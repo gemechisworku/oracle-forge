@@ -39,7 +39,7 @@ _Covers: X, Reddit, Medium, LinkedIn, Discord_
 | Date | Author | Subreddit | Title | Link | Upvotes | Comments |
 |------|--------|-----------|-------|------|---------|----------|
 | 2026-04-11 | Kirubel | r/learnmachinelearning | DataAgentBench shows the best frontier model hits 38% on realistic multi-DB data queries - what's actually causing the failures? | [link](https://www.reddit.com/r/learnmachinelearning/comments/1sieo3g/dataagentbench_shows_the_best_frontier_model_hits/) | -- | -- |
-| 2026-04-11 | Kirubel | r/LocalLLaMA | Testing whether your knowledge base documents actually work: injection testing with Groq Llama (21/21 pass rate) | [link](https://www.reddit.com/r/LocalLLaMA/comments/1siet5q/testing_whether_your_knowledge_base_documents/) | -- | -- |
+| 2026-04-11 | Kirubel | r/LocalLLaMA | I kept running into cases where retrieval was the bottleneck -- injection testing with Groq Llama (21/21 pass rate) | [link](https://www.reddit.com/r/LocalLLaMA/comments/1siqbda/i_kept_running_into_cases_where_retrieval_was/) | -- | -- |
 
 ### Discord
 
