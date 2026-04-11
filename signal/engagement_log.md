@@ -39,7 +39,13 @@ _Covers: X, Reddit, Medium, LinkedIn, Discord_
 | Date | Author | Subreddit | Title | Link | Upvotes | Comments |
 |------|--------|-----------|-------|------|---------|----------|
 | 2026-04-11 | Kirubel | r/learnmachinelearning | DataAgentBench shows the best frontier model hits 38% on realistic multi-DB data queries - what's actually causing the failures? | [link](https://www.reddit.com/r/learnmachinelearning/comments/1sieo3g/dataagentbench_shows_the_best_frontier_model_hits/) | -- | -- |
-| 2026-04-11 | Kirubel | r/LocalLLaMA | I kept running into cases where retrieval was the bottleneck -- injection testing with Groq Llama (21/21 pass rate) | [link](https://www.reddit.com/r/LocalLLaMA/comments/1siqbda/i_kept_running_into_cases_where_retrieval_was/) | -- | -- |
+| 2026-04-11 | Kirubel | r/LocalLLaMA | I kept running into cases where retrieval was the bottleneck -- injection testing with Groq Llama (21/21 pass rate) | [link](https://www.reddit.com/r/LocalLLaMA/comments/1siqbda/i_kept_running_into_cases_where_retrieval_was/) | -- | 1 |
+
+### Reddit Replies (substantive comments in threads)
+
+| Date | Author | Subreddit | Replying To | Summary | Link |
+|------|--------|-----------|-------------|---------|------|
+| 2026-04-11 | Kirubel | r/LocalLLaMA | u/matt-k-wong asking about model size | Clarified: Llama 3.3 70B via Groq. Explained structured docs (tables + code) outperform prose even at 70B -- same info as prose failed injection test, as table passed immediately. Invited comparison across param counts. | [thread](https://www.reddit.com/r/LocalLLaMA/comments/1siqbda/i_kept_running_into_cases_where_retrieval_was/) |
 
 ### Discord
 

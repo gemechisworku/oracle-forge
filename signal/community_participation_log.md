@@ -56,6 +56,7 @@ _Each entry names the specific technical focus and intelligence gathered._
 |----------|----------|-----------------|----------------------|------|
 | Community Participation | Reddit | Multi-DB, Evaluation | Posted to r/learnmachinelearning: DAB failure modes discussion. Summarized 4 failure categories, 38% ceiling, and injection-tested KB approach. (r/MachineLearning blocked posting -- karma/age requirement.) | [reddit](https://www.reddit.com/r/learnmachinelearning/comments/1sieo3g/dataagentbench_shows_the_best_frontier_model_hits/) |
 | Community Participation | Reddit | Architecture, Evaluation | Posted to r/LocalLLaMA: injection testing methodology with Groq Llama, 21/21 pass rate, practical observations on document length and format. | [reddit](https://www.reddit.com/r/LocalLLaMA/comments/1siqbda/i_kept_running_into_cases_where_retrieval_was/) |
+| Community Reply | Reddit | Architecture | Reply to u/matt-k-wong on r/LocalLLaMA: clarified model is Llama 3.3 70B via Groq (not a small model). Explained that structured docs (tables, code examples) outperform prose even at 70B params -- same info as prose failed injection test, rewritten as table with CUST-{padded_int} code example passed immediately. Invited comparison at different param counts. | [thread](https://www.reddit.com/r/LocalLLaMA/comments/1siqbda/i_kept_running_into_cases_where_retrieval_was/) |
 | Technical Deep-Dive | Internal | Architecture | Cloned repo, reviewed develop branch. Mapped full KB structure: 6 architecture + 9 domain + 4 correction + 3 evaluation docs. Verified 21/21 injection test results. | local |
 | Resource Acquisition | Internal | -- | Created signal/ directory infrastructure: engagement_log.md, community_participation_log.md, resource_acquisition.md. Branch: feat/signal-corps-engagement. | local |
 | Community Participation | X | -- | Curated 4 high-engagement accounts for reply-threading strategy: @shipp_ai, @_avichawla, @himanshustwts, @sh_reya. Identified Karpathy LLM wiki gist as content anchor. | -- |
@@ -75,6 +76,6 @@ _Each entry names the specific technical focus and intelligence gathered._
 
 ## Gaps to Address in Week 9
 - **Discord:** Zero engagement. Target: DAB community Discord, Hugging Face
-- **Reddit replies:** Zero comment engagement. Deploy reply templates in active threads
+- **Reddit replies:** First reply engagement on r/LocalLLaMA (u/matt-k-wong). Continue monitoring.
 - **X reply-threading:** Zero replies under larger accounts. Shift from broadcast to reply strategy
 - **Unstructured text + Domain knowledge content:** Underrepresented in external posts. Both are DAB failure categories with rich KB material.
