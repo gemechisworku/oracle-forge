@@ -1,7 +1,7 @@
 
 ---
 
-## File: `kb/v2-domain/unstructured/text_extraction_patterns.md`
+## File: `kb/domain/unstructured/text_extraction_patterns.md`
 
 ```markdown
 # Unstructured Text Extraction Patterns for DAB

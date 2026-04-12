@@ -2,8 +2,6 @@
 
 ## Last Consolidated: 2026-04-10
 
-
-
 ## Category: Join Key Transformation
 
 ### Pattern PG-INT to Mongo-String
@@ -14,7 +12,7 @@
 **Transformation:**
 
 ```python
-def transform(source_value, source_db, target_db):
+def transform(source_value, source_table, source_db, target_db):
     if source_db == 'postgresql' and target_db == 'mongodb':
         if 'subscriber' in source_table or 'customer' in source_table:
             return f"CUST-{source_value}"
@@ -72,6 +70,25 @@ Steps:
 4.Merge results on transformed key
 
 5.Spawn DuckDB worker for analytical aggregation on merged results
+
+## Category: Concurrency Control
+
+## Pattern Concurrent Worker Rate Limiting
+
+**Confidence:** 1/1 successes
+**Apply when:** batch size > 10 queries OR concurrent workers > 10
+**Rule:** max 10 concurrent workers, 30-second timeout per query
+**Implementation:**
+
+```python
+MAX_CONCURRENT_WORKERS = 10
+QUERY_TIMEOUT_SECONDS = 30
+
+with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_WORKERS) as executor:
+    futures = {executor.submit(run_query, q): q for q in query_batch}
+    for future in as_completed(futures, timeout=QUERY_TIMEOUT_SECONDS):
+        results.append(future.result())
+```
 
 ## Instructions for Agent
 

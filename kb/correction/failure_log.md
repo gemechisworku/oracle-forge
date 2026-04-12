@@ -13,7 +13,7 @@
 **Correct:** Extract with contains('parking') filter before counting
 
 **[Q067]** → Agent used calendar Q3 (Jul-Sep) when telecom dataset uses fiscal Q3 (Oct-Dec)
-**Correct:** Check dataset.fiscal_calendar from kb/v2-domain/domain_terms/ before applying date filters
+**Correct:** Check dataset.fiscal_calendar from kb/domain/domain_terms/ before applying date filters
 
 ---
 
