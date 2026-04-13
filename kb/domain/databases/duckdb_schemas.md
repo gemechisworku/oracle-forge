@@ -20,6 +20,28 @@
 - fiscal_year (INTEGER)
 - fiscal_quarter (INTEGER)
 
+## Yelp Dataset — Rating Source Warning
+
+**`business.stars` is a stale pre-computed aggregate**, updated weekly by a batch job.
+
+For any query asking for "average rating", "review score", or rating-based filters on Yelp data:
+- **Always recompute from `MongoDB reviews.stars`** grouped by `business_id`.
+- **Do NOT use `business.stars`** as if it were a live per-review average.
+
+```python
+# Correct: recompute from live reviews
+pipeline = [
+    {"$group": {"_id": "$business_id", "avg_rating": {"$avg": "$stars"}}}
+]
+
+# Wrong: stale weekly aggregate
+# SELECT stars FROM business WHERE ...
+```
+
+System prompt guard: "If query mentions 'rating' or 'review score' on Yelp data, ALWAYS join MongoDB reviews — do NOT use `business.stars`."
+
+---
+
 ## Important for DAB
 
 DuckDB is used for analytical queries that aggregate across large datasets.

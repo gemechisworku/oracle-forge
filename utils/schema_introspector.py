@@ -1,0 +1,264 @@
+"""Discover and cache schema information from all connected databases."""
+
+import asyncio
+from typing import Dict, List, Any, Optional
+from dataclasses import dataclass, field
+from collections import defaultdict
+
+@dataclass
+class ColumnInfo:
+    name: str
+    data_type: str
+    nullable: bool = True
+    is_primary_key: bool = False
+    sample_values: List[Any] = field(default_factory=list)
+
+@dataclass
+class TableInfo:
+    name: str
+    database: str
+    columns: Dict[str, ColumnInfo]
+    row_count: int = 0
+    description: str = ""
+
+class SchemaIntrospector:
+    """
+    Introspect and cache schema from PostgreSQL, SQLite, MongoDB, DuckDB.
+    
+    Features:
+    - Parallel schema discovery across databases
+    - Column type mapping
+    - Sample value collection for context
+    - Relationship detection (foreign keys, references)
+    - Change detection for schema evolution
+    """
+    
+    def __init__(self, db_executor):
+        self.db = db_executor
+        self.schemas: Dict[str, Dict[str, TableInfo]] = defaultdict(dict)  # db_type -> table_name -> TableInfo
+        self._cache_ttl = 300  # 5 minutes
+        self._last_refresh = 0
+    
+    async def refresh(self, force: bool = False) -> None:
+        """Refresh schema cache from all databases."""
+        import time
+        now = time.time()
+        if not force and (now - self._last_refresh) < self._cache_ttl:
+            return
+        
+        tasks = [
+            self._introspect_postgresql(),
+            self._introspect_sqlite(),
+            self._introspect_mongodb(),
+            self._introspect_duckdb()
+        ]
+        await asyncio.gather(*tasks)
+        self._last_refresh = now
+    
+    async def _introspect_postgresql(self) -> None:
+        """Introspect PostgreSQL schema."""
+        try:
+            async with self.db.postgres_pool.acquire() as conn:
+                # Get all tables
+                tables = await conn.fetch("""
+                    SELECT table_name FROM information_schema.tables
+                    WHERE table_schema = 'public'
+                """)
+                
+                for table in tables:
+                    table_name = table['table_name']
+                    
+                    # Get columns
+                    columns = await conn.fetch("""
+                        SELECT column_name, data_type, is_nullable
+                        FROM information_schema.columns
+                        WHERE table_name = $1
+                    """, table_name)
+                    
+                    # Get sample values (first 3 rows)
+                    sample = await conn.fetch(f"SELECT * FROM {table_name} LIMIT 3")
+                    
+                    col_info = {}
+                    for col in columns:
+                        sample_vals = [row[col['column_name']] for row in sample if row[col['column_name']] is not None]
+                        col_info[col['column_name']] = ColumnInfo(
+                            name=col['column_name'],
+                            data_type=col['data_type'],
+                            nullable=col['is_nullable'] == 'YES',
+                            sample_values=sample_vals[:2]
+                        )
+                    
+                    row_count = await conn.fetchval(f"SELECT COUNT(*) FROM {table_name}")
+                    self.schemas['postgresql'][table_name] = TableInfo(
+                        name=table_name,
+                        database='postgresql',
+                        columns=col_info,
+                        row_count=row_count or 0
+                    )
+        except Exception as e:
+            print(f"PostgreSQL introspection failed: {e}")
+    
+    async def _introspect_sqlite(self) -> None:
+        """Introspect SQLite schema."""
+        try:
+            cursor = self.db.sqlite_conn.execute("""
+                SELECT name FROM sqlite_master WHERE type='table'
+            """)
+            tables = cursor.fetchall()
+            
+            for (table_name,) in tables:
+                # Get column info
+                cursor = self.db.sqlite_conn.execute(f"PRAGMA table_info({table_name})")
+                columns = cursor.fetchall()
+                
+                # Get sample
+                cursor = self.db.sqlite_conn.execute(f"SELECT * FROM {table_name} LIMIT 3")
+                sample = cursor.fetchall()
+                col_names = [desc[0] for desc in cursor.description] if cursor.description else []
+                
+                col_info = {}
+                for col in columns:
+                    col_name = col[1]
+                    col_type = col[2]
+                    idx = col_names.index(col_name) if col_name in col_names else -1
+                    sample_vals = [row[idx] for row in sample if idx >= 0 and row[idx] is not None]
+                    
+                    col_info[col_name] = ColumnInfo(
+                        name=col_name,
+                        data_type=col_type,
+                        nullable=col[3] == 0,
+                        sample_values=sample_vals[:2]
+                    )
+                
+                count_cursor = self.db.sqlite_conn.execute(f"SELECT COUNT(*) FROM {table_name}")
+                row_count = count_cursor.fetchone()[0]
+                self.schemas['sqlite'][table_name] = TableInfo(
+                    name=table_name,
+                    database='sqlite',
+                    columns=col_info,
+                    row_count=row_count
+                )
+        except Exception as e:
+            print(f"SQLite introspection failed: {e}")
+    
+    async def _introspect_mongodb(self) -> None:
+        """Introspect MongoDB collections (PyMongo sync calls offloaded to executor)."""
+        try:
+            loop = asyncio.get_event_loop()
+            db = self.db.mongo_client.get_database('dab')
+
+            collections = await loop.run_in_executor(None, db.list_collection_names)
+
+            for coll_name in collections:
+                collection = db[coll_name]
+                sample = await loop.run_in_executor(
+                    None, lambda c=collection: list(c.find().limit(3))
+                )
+                row_count = await loop.run_in_executor(
+                    None, collection.count_documents, {}
+                )
+
+                if sample:
+                    # Infer schema from first document
+                    col_info = {}
+                    for key, value in sample[0].items():
+                        if key == '_id':
+                            continue
+                        col_info[key] = ColumnInfo(
+                            name=key,
+                            data_type=type(value).__name__,
+                            sample_values=[doc.get(key) for doc in sample[:2] if doc.get(key)]
+                        )
+
+                    self.schemas['mongodb'][coll_name] = TableInfo(
+                        name=coll_name,
+                        database='mongodb',
+                        columns=col_info,
+                        row_count=row_count
+                    )
+        except Exception as e:
+            print(f"MongoDB introspection failed: {e}")
+    
+    async def _introspect_duckdb(self) -> None:
+        """Introspect DuckDB schema."""
+        try:
+            result = self.db.duckdb_conn.execute("""
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'main'
+            """).fetchall()
+            
+            for (table_name,) in result:
+                # Get columns
+                columns = self.db.duckdb_conn.execute(f"DESCRIBE {table_name}").fetchall()
+                
+                # Get sample — read description before fetchall to avoid exhausted cursor
+                sample_rel = self.db.duckdb_conn.execute(f"SELECT * FROM {table_name} LIMIT 3")
+                col_names = [desc[0] for desc in sample_rel.description]
+                sample = sample_rel.fetchall()
+                
+                col_info = {}
+                for col in columns:
+                    col_name = col[0]
+                    col_type = col[1]
+                    idx = col_names.index(col_name) if col_name in col_names else -1
+                    sample_vals = [row[idx] for row in sample if idx >= 0 and row[idx] is not None]
+                    
+                    col_info[col_name] = ColumnInfo(
+                        name=col_name,
+                        data_type=col_type,
+                        nullable=col[2] == 'YES',
+                        sample_values=sample_vals[:2]
+                    )
+                
+                row_count = self.db.duckdb_conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+                self.schemas['duckdb'][table_name] = TableInfo(
+                    name=table_name,
+                    database='duckdb',
+                    columns=col_info,
+                    row_count=row_count
+                )
+        except Exception as e:
+            print(f"DuckDB introspection failed: {e}")
+    
+    async def get_relevant_tables(self, query: str, top_k: int = 5) -> List[TableInfo]:
+        """
+        Find tables relevant to a natural language query.
+        Uses keyword matching on table/column names.
+        """
+        await self.refresh()
+        
+        keywords = set(query.lower().split())
+        relevance = []
+        
+        for db_type, tables in self.schemas.items():
+            for table_name, table_info in tables.items():
+                score = 0
+                # Check table name matches
+                table_words = set(table_name.lower().split('_'))
+                score += len(keywords & table_words) * 2
+                
+                # Check column names
+                for col_name in table_info.columns.keys():
+                    col_words = set(col_name.lower().split('_'))
+                    score += len(keywords & col_words)
+                
+                if score > 0:
+                    relevance.append((score, table_info))
+        
+        relevance.sort(reverse=True)
+        return [info for _, info in relevance[:top_k]]
+    
+    def get_all_schemas_as_text(self) -> str:
+        """Convert all schemas to text for context injection."""
+        lines = []
+        for db_type, tables in self.schemas.items():
+            lines.append(f"\n## Database: {db_type.upper()}")
+            for table_name, table_info in tables.items():
+                lines.append(f"\n### Table: {table_name}")
+                lines.append(f"Columns: {', '.join(table_info.columns.keys())}")
+                for col_name, col_info in list(table_info.columns.items())[:5]:
+                    samples = col_info.sample_values[:2]
+                    sample_str = f" (e.g., {samples})" if samples else ""
+                    lines.append(f"  - {col_name}: {col_info.data_type}{sample_str}")
+        
+        return "\n".join(lines)

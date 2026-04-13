@@ -40,6 +40,22 @@
 
 ---
 
+## 2026-04-13 — Probe Resolutions
+
+**[J1]** → JOIN on customer_id (PostgreSQL INT) vs customer_ref ("C{id}" STRING in DuckDB) returned 0 rows
+**Correct:** Strip "C" prefix and cast to int: `df_churn['cid_int'] = df_churn['customer_ref'].str.lstrip('C').astype(int)`, then merge on integer key. See `utils/join_key_resolver.py`.
+
+**[U2]** → Case-sensitive `LIKE '%urgent%'` in PostgreSQL missed "Urgent" and "URGENT" (~15% undercount)
+**Correct:** Use `ILIKE '%urgent%'` in PostgreSQL. Python fallback: `str.contains('urgent', case=False, na=False)`.
+
+**[D3]** → Agent computed intraday return (`close / open - 1`) instead of close-to-close daily return for stock data
+**Correct:** Use `df['close'].pct_change()` after sorting by date. First row will be NaN — do NOT fill with 0.
+
+**[D4]** → Agent filtered Yelp businesses on `stars >= 4.5` without checking `is_open`, returning permanently closed businesses
+**Correct:** Always include `WHERE is_open = 1 AND stars >= 4.5` when querying active Yelp businesses.
+
+---
+
 ## Instructions for Agent
 
 1. Read this entire file at session start

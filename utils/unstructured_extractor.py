@@ -1,0 +1,232 @@
+"""Extract structured data from unstructured text fields using regex + LLM fallback."""
+
+import re
+from typing import List, Dict, Any, Optional, Tuple
+from dataclasses import dataclass
+from enum import Enum
+
+class ExtractionType(Enum):
+    AMOUNT = "amount"
+    DATE = "date"
+    EMAIL = "email"
+    PRODUCT_CODE = "product_code"
+    SEVERITY = "severity"
+    COLOR = "color"
+    CUSTOMER_ID = "customer_id"
+    CHURN_REASON = "churn_reason"
+
+@dataclass
+class ExtractionRule:
+    """Regex-based extraction rule with post-processing."""
+    pattern: str
+    extract_group: int = 0
+    post_process: Optional[str] = None  # 'float', 'int', 'strip', 'lower'
+    
+class UnstructuredExtractor:
+    """
+    Extract structured information from unstructured text.
+    
+    Supports:
+    - Currency amounts ($49.99, 49.99 USD)
+    - Dates (multiple formats)
+    - Severity levels from keywords
+    - Colors from descriptions
+    - Product codes with varying formats
+    - Customer IDs with prefixes
+    
+    Uses regex first, falls back to LLM for complex cases.
+    """
+    
+    def __init__(self, llm_client=None):
+        self.llm_client = llm_client
+        
+        # Pre-compiled extraction rules
+        self.rules = {
+            ExtractionType.AMOUNT: [
+                ExtractionRule(r'\$(\d+(?:\.\d{2})?)', 1, 'float'),
+                ExtractionRule(r'(\d+(?:\.\d{2})?)\s*(?:USD|dollars)', 1, 'float'),
+                ExtractionRule(r'refunded\s*\$?(\d+(?:\.\d{2})?)', 1, 'float'),
+            ],
+            ExtractionType.DATE: [
+                ExtractionRule(r'(\d{4}-\d{2}-\d{2})', 1, None),  # ISO
+                ExtractionRule(r'(\d{2}/\d{2}/\d{4})', 1, None),  # MM/DD/YYYY
+                ExtractionRule(r'(\w+\s+\d{1,2},?\s+\d{4})', 1, None),  # March 15, 2026
+            ],
+            ExtractionType.SEVERITY: [
+                ExtractionRule(r'\b(urgent|critical|high|severe|down|outage)\b', 0, 'lower'),
+                ExtractionRule(r'\b(medium|moderate)\b', 0, 'lower'),
+                ExtractionRule(r'\b(low|minor|trivial)\b', 0, 'lower'),
+            ],
+            ExtractionType.COLOR: [
+                ExtractionRule(r'\b(black|white|red|blue|green|yellow|silver|gold|gray|grey)\b', 0, 'lower'),
+            ],
+            ExtractionType.PRODUCT_CODE: [
+                ExtractionRule(r'([A-Z]{2,4}-\d{3,6}(?:-[A-Z])?)', 1, 'strip'),
+                ExtractionRule(r'([A-Z]{2,4}_\d{3,6}(?:_[A-Z])?)', 1, 'strip'),
+            ],
+            ExtractionType.CUSTOMER_ID: [
+                ExtractionRule(r'CUST[_-]?(\d+)', 1, 'int'),
+                ExtractionRule(r'cust[_-]?(\d+)', 1, 'int'),
+                ExtractionRule(r'user[_-]?(\d+)', 1, 'int'),
+            ],
+            ExtractionType.CHURN_REASON: [
+                ExtractionRule(r'\b(price|pricing|cost|costly|expensive|overpriced|cheap|affordable)\b', 0, 'lower'),
+                ExtractionRule(r'\b(service|support|help|response|slow|poor)\b', 0, 'lower'),
+                ExtractionRule(r'\b(competitor|competition|switched|alternative|elsewhere)\b', 0, 'lower'),
+            ],
+        }
+    
+    def extract(self, text: str, extract_type: ExtractionType, use_llm: bool = True) -> List[Any]:
+        """
+        Extract values from text using regex, optionally fallback to LLM.
+        
+        Args:
+            text: Input unstructured text
+            extract_type: Type of data to extract
+            use_llm: If True and regex fails, try LLM extraction
+        
+        Returns:
+            List of extracted values (strings, floats, or ints)
+        """
+        values = []
+        
+        # Try regex rules first
+        for rule in self.rules.get(extract_type, []):
+            pattern = re.compile(rule.pattern, re.IGNORECASE)
+            matches = pattern.findall(text)
+            for match in matches:
+                if isinstance(match, tuple):
+                    val = match[rule.extract_group] if rule.extract_group < len(match) else match[0]
+                else:
+                    val = match
+                
+                # Apply post-processing
+                if rule.post_process == 'float':
+                    val = float(val)
+                elif rule.post_process == 'int':
+                    val = int(val)
+                elif rule.post_process == 'lower':
+                    val = val.lower()
+                elif rule.post_process == 'strip':
+                    val = val.strip()
+                
+                values.append(val)
+        
+        # Deduplicate while preserving order
+        seen = set()
+        unique_values = []
+        for v in values:
+            if v not in seen:
+                seen.add(v)
+                unique_values.append(v)
+        
+        # If regex found nothing, try LLM
+        if not unique_values and use_llm and self.llm_client:
+            unique_values = self._extract_with_llm(text, extract_type)
+        
+        return unique_values
+    
+    def _extract_with_llm(self, text: str, extract_type: ExtractionType) -> List[Any]:
+        """Fallback to LLM for complex extraction."""
+        # This would call the LLM with a specific prompt
+        # Simplified for now - in production, implement with Groq
+        prompt = f"Extract all {extract_type.value}s from this text. Return as JSON list: {text}"
+        # response = await self.llm_client.chat(...)
+        return []  # Placeholder
+    
+    def extract_amounts(self, text: str) -> List[float]:
+        """Convenience method for currency amounts."""
+        return self.extract(text, ExtractionType.AMOUNT)
+    
+    def extract_dates(self, text: str) -> List[str]:
+        """Convenience method for dates."""
+        return self.extract(text, ExtractionType.DATE)
+    
+    def classify_severity(self, text: str) -> Optional[str]:
+        """Return normalized severity level ('high', 'medium', 'low') from text."""
+        severities = self.extract(text, ExtractionType.SEVERITY)
+        priority = {
+            'critical': 4, 'urgent': 4, 'outage': 4, 'down': 4,
+            'high': 3, 'severe': 3,
+            'medium': 2, 'moderate': 2,
+            'low': 1, 'minor': 1, 'trivial': 1,
+        }
+        label_map = {
+            'critical': 'high', 'urgent': 'high', 'outage': 'high', 'down': 'high',
+            'high': 'high', 'severe': 'high',
+            'medium': 'medium', 'moderate': 'medium',
+            'low': 'low', 'minor': 'low', 'trivial': 'low',
+        }
+        if severities:
+            top = max(severities, key=lambda s: priority.get(s, 0))
+            return label_map.get(top, top)
+        return None
+
+    def classify_churn_reasons(self, text: str) -> str:
+        """
+        Classify churn reason from free text into 'price', 'service', 'competitor', or 'other'.
+
+        Used for crmarenapro unstructured churn analysis. See kb/domain/unstructured/text_extraction_patterns.md.
+        """
+        price_keywords = {'price', 'pricing', 'cost', 'costly', 'expensive', 'overpriced', 'cheap', 'affordable'}
+        service_keywords = {'service', 'support', 'help', 'response', 'slow', 'poor'}
+        competitor_keywords = {'competitor', 'competition', 'switched', 'alternative', 'elsewhere'}
+
+        reasons = self.extract(text, ExtractionType.CHURN_REASON)
+        for reason in reasons:
+            if reason in price_keywords:
+                return 'price'
+            if reason in service_keywords:
+                return 'service'
+            if reason in competitor_keywords:
+                return 'competitor'
+
+        return 'other'
+
+
+POS_WORDS = re.compile(
+    r'\b(great|excellent|amazing|love|perfect|best|delicious|friendly|clean)\b', re.I
+)
+NEG_WORDS = re.compile(
+    r'\b(terrible|awful|disgusting|rude|worst|horrible|cold|slow|never again)\b', re.I
+)
+
+
+class SentimentClassifier:
+    """Classify a batch of review texts as positive, negative, or neutral.
+
+    Uses per-document keyword presence (not frequency) so that one review with
+    five positive words still counts as a single positive document.  Threshold
+    of 0.6 means ≥ 60% of keyword-matched documents must be positive to return
+    'positive'; otherwise 'negative'.  Required for U3 (Yelp bulk sentiment).
+    """
+
+    def classify_bulk(self, texts: List[str]) -> str:
+        """Return 'positive', 'negative', or 'neutral' for a list of review texts."""
+        pos = sum(bool(POS_WORDS.search(str(t))) for t in texts)
+        neg = sum(bool(NEG_WORDS.search(str(t))) for t in texts)
+        if pos + neg == 0:
+            return 'neutral'
+        return 'positive' if pos / (pos + neg) >= 0.6 else 'negative'
+
+
+class CategoryMatcher:
+    """Match against pipe-separated category strings (e.g. Yelp business.categories).
+
+    Yelp stores categories as a pipe-separated string like 'Restaurants|Pizza|Italian',
+    not as a normalized foreign key or array.  Direct equality or LIKE '%Pizza%' will
+    produce false positives on substrings.  Use match_pipe_field for exact element
+    matching.  Required for J5.
+    """
+
+    @staticmethod
+    def match_pipe_field(value: str, category: str) -> bool:
+        """Return True if *category* is an exact element in the pipe-separated *value*.
+
+        Case-insensitive; leading/trailing whitespace on each element is stripped.
+
+        Example:
+            match_pipe_field('Restaurants|Pizza|Italian', 'pizza') → True
+            match_pipe_field('Restaurants|Pizza|Italian', 'Fast Food') → False
+        """
+        return category.strip().lower() in [c.strip().lower() for c in value.split('|')]
