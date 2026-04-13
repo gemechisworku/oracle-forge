@@ -1,7 +1,7 @@
 
 ---
 
-## File: `kb/v2-domain/domain_terms/business_glossary.md`
+## File: `kb/domain/domain_terms/business_glossary.md`
 
 ```markdown
 # Domain Term Definitions by Dataset

@@ -47,27 +47,53 @@ oracle-forge-data-agent/
 # Install dependencies
 pip install -r requirements.txt
 
-# Configure Groq API key (interactive)
+# Configure Groq API key (interactive — writes key to .env)
 bash setup_groq_tests.sh
 
-# Or set manually
+# Or add to .env manually (run_injection_tests.py reads this automatically)
+echo 'GROQ_API_KEY="your-key-here"' >> .env
+
+# Or export for the current shell session only
 export GROQ_API_KEY="your-key-here"
 ```
 
 ## Running Injection Tests
 
+Use `run_injection_tests.py` from the **project root** — it reads `.env` automatically and saves timestamped results to `injection_results/`.
+
 ```bash
-# Run the full suite (21 documents)
-python kb/injection_test.py --kb-path ./kb
+# Full suite — saves JSON + Markdown to injection_results/
+python run_injection_tests.py
+
+# Full suite with LLM answers printed
+python run_injection_tests.py --verbose
+
+# Full suite + update kb/INJECTION_TEST_LOG.md
+python run_injection_tests.py --update-log
+
+# Check that all document paths resolve (no API call)
+python run_injection_tests.py --validate-paths
 
 # Test a single document
-python kb/injection_test.py --kb-path ./kb --test-single architecture/memory.md --verbose
+python run_injection_tests.py --test-single architecture/memory.md
 
-# Save results to JSON
-python kb/injection_test.py --kb-path ./kb --output injection_test_results.json
+# Custom results directory
+python run_injection_tests.py --results-dir ./my_results
 ```
 
-Current pass rate: **21/21 (100%)** — see `injection_test_results.json`.
+**Direct runner** (if you need lower-level control or are calling from a script):
+
+```bash
+# Must be run from the project root; pass --kb-path and --api-key explicitly
+python kb/injection_test.py --kb-path ./kb --api-key "$GROQ_API_KEY"
+python kb/injection_test.py --kb-path ./kb --api-key "$GROQ_API_KEY" --verbose
+python kb/injection_test.py --kb-path ./kb --api-key "$GROQ_API_KEY" --test-single architecture/memory.md
+python kb/injection_test.py --kb-path ./kb --api-key "$GROQ_API_KEY" --validate-paths
+```
+
+Results are written to `injection_results/` as `injection_test_YYYY-MM-DD_HH-MM-SS.json` and `.md`.
+
+Current pass rate: **21/21 (100%)** — see `injection_results/`.
 
 ## Session Start — Document Load Order
 

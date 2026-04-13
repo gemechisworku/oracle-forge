@@ -5,7 +5,7 @@
 | Entity | PostgreSQL Format | MongoDB Format | Transformation |
 |--------|------------------|----------------|----------------|
 | business_id | "abc123def456" (TEXT) | "abc123def456" (STRING) | Direct match |
-| user_id | "user_12345" (TEXT) | "USER-12345" (STRING) | user_id.replace('user_', 'USER-') |
+| user_id | "user_12345" (TEXT) | "USER-12345" (STRING) | See idempotent transform in Code Implementation |
 | review_id | "xyz789abc123" (TEXT) | "xyz789abc123" (STRING) | Direct match |
 
 ## Telecom Dataset
@@ -42,6 +42,12 @@ def resolve_join_key(value, source_table, target_table):
         if isinstance(value, str) and value.startswith('CUST-'):
             return int(value.replace('CUST-', ''))
     return value
+
+def transform_yelp_user_id(user_id: str) -> str:
+    """Idempotent: safe to call even if already in USER- format."""
+    if user_id.startswith('USER-'):
+        return user_id  # already transformed — do not double-transform
+    return user_id.replace('user_', 'USER-')
 ```
 
 ## Injection Test

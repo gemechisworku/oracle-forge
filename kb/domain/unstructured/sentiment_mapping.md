@@ -9,19 +9,47 @@
 
 frustrated, angry, terrible, awful, worst, broken, not working,
 failed, error, complaint, unhappy, disappointed, useless, waste,
-terrible, horrible, unacceptable, furious, annoyed, upset
+horrible, unacceptable, furious, annoyed, upset, ridiculous,
+pathetic, disgusting, outrageous, fed up, sick of, done with,
+never again, worst ever, zero stars, waste of time, waste of money
 
+## **Informal / Slang Negative Indicators:**
+
+wtf, smh, ugh, omg this is bad, seriously, beyond bad, complete joke,
+absolute disaster, total failure, beyond frustrated
+
+## **Sarcasm Markers (classify as negative):**
+
+"great, thanks for nothing", "oh wonderful", "just what I needed" (when followed by negative context),
+"amazing how", "sure that helps", "fantastic job" (ironic — check surrounding context for failure words)
 
 ## **Positive Indicators (for completeness):**
 
-excellent, great, amazing, wonderful, happy, satisfied, perfect,outstanding, fantastic, helpful, quick, easy, recommended
-
+excellent, great, amazing, wonderful, happy, satisfied, perfect,
+outstanding, fantastic, helpful, quick, easy, recommended
 
 ## Negation Handling
 
 If "not" precedes indicator, flip sentiment:
+
 - "not good" → negative
 - "not bad" → non-negative (not positive)
+- "not happy" → negative
+- "not satisfied" → negative
+- "not working" → negative (already in negative list)
+- "couldn't be better" → positive (double negative = positive)
+
+## Mixed Sentiment Rule
+
+If text contains both positive and negative indicators, **negative wins**:
+
+```python
+has_negative = any(ind in text_lower for ind in negative_indicators)
+has_positive = any(ind in text_lower for ind in positive_indicators)
+if has_negative:
+    return 'negative'  # negative overrides positive in support ticket context
+return 'positive' if has_positive else 'non-negative'
+```
 
 **Implementation:**
 
@@ -40,6 +68,7 @@ def get_sentiment(text):
         return 'negative'
     return 'non-negative'
 ```
+
 ## Counting Negative Mentions
 
 For query "count negative sentiment mentions":
