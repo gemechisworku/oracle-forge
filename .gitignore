@@ -6,3 +6,6 @@ __pycache__/
 # Signal Corps drafts and strategy (local only)
 signal/drafts/
 signal/daily/
+
+# Local DAB clone (external dependency; do not commit vendor tree)
+DataAgentBench/
