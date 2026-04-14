@@ -144,6 +144,7 @@ class MCPToolsClient:
                 "tool_used": tool_name,
                 "selection_reason": selection_reason,
                 "dialect_handling": dialect_handling,
+                "raw_query": payload.get("sql") or payload.get("pipeline") or "",
                 "result_summary": result_summary(response.get("data") if response.get("ok") else sanitize_error(response.get("error", ""))),
                 "duration_ms": duration_ms,
                 "success": bool(response.get("ok")),

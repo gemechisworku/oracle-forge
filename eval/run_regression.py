@@ -13,7 +13,7 @@ from eval.dab_evaluator import run_regression_suite
 
 def main() -> None:
     output_path = ROOT / "eval" / "regression_results.json"
-    dataset_path = ROOT / "eval" / "regression_queries.json"
+    dataset_path = ROOT / "eval" / "regression_suite.json"
     report = run_regression_suite(dataset_path)
     output_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps({"regression_pass": report["regression_pass"], "total_queries": report["total_queries"]}, indent=2))

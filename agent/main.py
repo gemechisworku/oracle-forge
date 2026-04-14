@@ -7,7 +7,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
+from dotenv import load_dotenv
+
+from utils.schema_introspection_tool import SchemaIntrospectionTool
+from utils.token_limiter import TokenLimiter
+
 from .context_builder import ContextBuilder
+from .llm_reasoner import GroqLlamaReasoner
 from .planner import QueryPlanner
 from .sandbox_client import SandboxClient
 from .tools_client import MCPToolsClient
@@ -18,7 +24,6 @@ from .utils import (
     join_records,
     sanitize_error,
 )
-
 
 def _env_bool(name: str, default: bool) -> bool:
     value = os.getenv(name)
@@ -33,12 +38,14 @@ def _merge_outputs(step_outputs: List[Dict[str, Any]], trace: List[Dict[str, Any
     if not normalized:
         return []
     merged = normalized[0]
-    for right_rows in normalized[1:]:
+    left_db = step_outputs[0].get("database", "postgresql")
+    for idx, right_rows in enumerate(normalized[1:], start=1):
         left_key = infer_join_key(merged)
         right_key = infer_join_key(right_rows)
         if not left_key or not right_key:
             continue
-        joined = join_records(merged, right_rows, left_key, right_key)
+        right_db = step_outputs[idx].get("database", "mongodb")
+        joined = join_records(merged, right_rows, left_key, right_key, left_db=left_db, right_db=right_db)
         trace.append(
             {
                 "merge_event": True,
@@ -46,9 +53,11 @@ def _merge_outputs(step_outputs: List[Dict[str, Any]], trace: List[Dict[str, Any
                 "right_key": right_key,
                 "rows_before": len(merged),
                 "rows_after": len(joined),
+                "join_resolver_used": "utils.join_key_resolver.JoinKeyResolver",
             }
         )
         merged = joined if joined else merged
+        left_db = right_db
     return merged
 
 
@@ -94,27 +103,65 @@ def _record_runtime_corrections(question: str, plan: Dict[str, Any], tool_result
             handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
+def _log_agent_run(payload: Dict[str, Any]) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    target = repo_root / "docs" / "driver_notes" / "agent_runtime_log.jsonl"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
 def run_agent(question: str, available_databases: List[str], schema_info: Dict[str, Any]) -> Dict[str, Any]:
     trace: List[Dict[str, Any]] = []
-    mock_mode = _env_bool("ORACLE_FORGE_MOCK_MODE", True)
+    repo_root = Path(__file__).resolve().parents[1]
+    load_dotenv(repo_root / ".env")
+    token_limiter = TokenLimiter(
+        max_prompt_tokens=int(os.getenv("MAX_PROMPT_TOKENS", "3500")),
+        max_tool_loops=int(os.getenv("MAX_TOOL_LOOPS", "12")),
+    )
+    mock_mode = _env_bool("ORACLE_FORGE_MOCK_MODE", False)
     tools = MCPToolsClient(
         base_url=os.getenv("MCP_BASE_URL", "http://localhost:5000"),
         mock_mode=mock_mode,
     )
     discovered_tools = tools.discover_tools()
     discovered_schema = tools.get_schema_metadata()
-    context = ContextBuilder().build(question, available_databases, schema_info, discovered_schema)
-    plan = QueryPlanner(context).create_plan(question, available_databases)
+    schema_metadata = SchemaIntrospectionTool().collect(discovered_schema)
+    context = ContextBuilder().build(question, available_databases, schema_info, schema_metadata)
+    context["context_layers"] = token_limiter.trim_context_layers(context.get("context_layers", {}))
+    reasoner = GroqLlamaReasoner(repo_root=repo_root, token_limiter=token_limiter)
+    llm_guidance = reasoner.plan(question=question, available_databases=available_databases, context=context)
+    context["llm_guidance"] = {
+        "selected_databases": llm_guidance.selected_databases,
+        "rationale": llm_guidance.rationale,
+        "query_hints": llm_guidance.query_hints,
+        "model": llm_guidance.model,
+        "used_llm": llm_guidance.used_llm,
+    }
+    planner = QueryPlanner(context)
+    plan = planner.create_plan(question, available_databases)
     sandbox = SandboxClient(enabled=True)
     used_databases: List[Dict[str, str]] = []
     retries = 0
+    tool_loop_counter = 0
 
     def _execute(step: Dict[str, Any]) -> Dict[str, Any]:
+        nonlocal tool_loop_counter
+        tool_loop_counter += 1
+        if not token_limiter.enforce_loop_limit(tool_loop_counter):
+            return {
+                "ok": False,
+                "error": "Tool loop limit exceeded.",
+                "error_type": "tool_routing_error",
+                "tool": "",
+                "failed_query": str(step.get("query_payload")),
+            }
         tool_name = tools.select_tool(step.get("database", ""), step.get("dialect", "sql"))
         if not tool_name:
             return {
                 "ok": False,
                 "error": f"No compatible tool discovered for database: {step.get('database')}",
+                "error_type": "tool_routing_error",
                 "tool": "",
                 "failed_query": str(step.get("query_payload")),
             }
@@ -133,9 +180,26 @@ def run_agent(question: str, available_databases: List[str], schema_info: Dict[s
             trace=trace,
             max_retries=2,
         )
+        result["database"] = step.get("database")
         return result
 
-    sandbox_outcome = sandbox.execute_plan(plan, _execute)
+    closed_loop = planner.execute_closed_loop(
+        question=question,
+        available_databases=available_databases,
+        step_executor=_execute,
+        max_replans=min(2, max(0, token_limiter.max_tool_loops // 3)),
+    )
+    attempts = closed_loop["attempts"]
+    latest_attempt = attempts[-1] if attempts else {"plan": plan, "results": []}
+    plan = latest_attempt["plan"]
+    sandbox_outcome = sandbox.execute_plan(plan, _execute) if not latest_attempt["results"] else {
+        "result": latest_attempt["results"],
+        "trace": [{"sandbox_mode": "simulated", "steps_executed": len(latest_attempt["results"])}],
+        "validation_status": {
+            "valid": all(item.get("ok") for item in latest_attempt["results"]),
+            "failed_steps": [i + 1 for i, item in enumerate(latest_attempt["results"]) if not item.get("ok")],
+        },
+    }
     tool_results = sandbox_outcome["result"]
     _record_runtime_corrections(question, plan, tool_results)
     retries = sum(max(0, int(item.get("attempts", 1)) - 1) for item in tool_results)
@@ -150,7 +214,8 @@ def run_agent(question: str, available_databases: List[str], schema_info: Dict[s
     ]
 
     if successful_steps == 0:
-        return {
+        safe_errors = [sanitize_error(item.get("error", "")) for item in tool_results if not item.get("ok")]
+        response = {
             "status": "failure",
             "question": question,
             "answer": None,
@@ -162,13 +227,42 @@ def run_agent(question: str, available_databases: List[str], schema_info: Dict[s
                 used_mock_mode=mock_mode,
             ),
             "trace": trace,
+            "query_trace": trace,
             "plan": plan,
             "used_databases": used_databases,
             "validation_status": sandbox_outcome["validation_status"],
-            "error": "All tool executions failed; no verified result available.",
-            "error_summary": [sanitize_error(item.get("error", "")) for item in tool_results if not item.get("ok")],
+            "error": "Safe failure: unable to complete query after bounded retries.",
+            "error_summary": safe_errors,
             "predicted_queries": predicted_queries,
+            "architecture_disclosure": {
+                "mcp_tools_used": [entry.get("tool") for entry in used_databases],
+                "kb_layers_accessed": ["v1_architecture", "v2_domain", "v3_corrections"],
+                "llm_model": llm_guidance.model,
+                "llm_used_for_reasoning": llm_guidance.used_llm,
+                "confidence_score": confidence_score(
+                    total_steps=max(1, len(plan.get("steps", []))),
+                    successful_steps=0,
+                    retries=retries,
+                    explicit_failure=True,
+                    used_mock_mode=mock_mode,
+                ),
+            },
+            "token_usage": token_limiter.usage_entry(
+                prompt_text=json.dumps({"question": question, "context": context.get("context_layers", {})}, ensure_ascii=False),
+                completion_text=json.dumps({"trace": trace}, ensure_ascii=False),
+            ),
         }
+        _log_agent_run(
+            {
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                "question": question,
+                "status": response["status"],
+                "confidence": response["confidence"],
+                "used_databases": response["used_databases"],
+                "architecture_disclosure": response["architecture_disclosure"],
+            }
+        )
+        return response
 
     merged_records = _merge_outputs(tool_results, trace)
     metrics = compute_metrics(merged_records)
@@ -181,19 +275,56 @@ def run_agent(question: str, available_databases: List[str], schema_info: Dict[s
         explicit_failure=explicit_failure,
         used_mock_mode=mock_mode,
     )
-    return {
+    response = {
         "status": "success" if not explicit_failure else "partial_success",
         "question": question,
         "answer": answer,
         "metrics": metrics,
         "confidence": confidence,
         "trace": trace,
+        "query_trace": trace,
         "plan": plan,
         "tools_discovered_count": len(discovered_tools),
         "used_databases": used_databases,
         "validation_status": sandbox_outcome["validation_status"],
         "mock_mode": mock_mode,
         "predicted_queries": predicted_queries,
+        "architecture_disclosure": {
+            "mcp_tools_used": [entry.get("tool") for entry in used_databases],
+            "kb_layers_accessed": ["v1_architecture", "v2_domain", "v3_corrections"],
+            "llm_model": llm_guidance.model,
+            "llm_used_for_reasoning": llm_guidance.used_llm,
+            "confidence_score": confidence,
+        },
+        "context_layers_used": list(context.get("context_layers", {}).keys()),
+        "token_usage": token_limiter.usage_entry(
+            prompt_text=json.dumps({"question": question, "context": context.get("context_layers", {})}, ensure_ascii=False),
+            completion_text=json.dumps({"trace": trace, "answer": answer}, ensure_ascii=False),
+        ),
+    }
+    _log_agent_run(
+        {
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "question": question,
+            "status": response["status"],
+            "confidence": response["confidence"],
+            "used_databases": response["used_databases"],
+            "architecture_disclosure": response["architecture_disclosure"],
+        }
+    )
+    return response
+
+
+def run_agent_contract(payload: Dict[str, Any]) -> Dict[str, Any]:
+    question = str(payload.get("question", ""))
+    available_databases = payload.get("available_databases", ["postgresql", "mongodb", "sqlite", "duckdb"])
+    schema_info = payload.get("schema_info", {})
+    result = run_agent(question=question, available_databases=available_databases, schema_info=schema_info)
+    return {
+        "answer": result.get("answer"),
+        "query_trace": result.get("query_trace", result.get("trace", [])),
+        "confidence": result.get("confidence", 0.0),
+        "status": result.get("status"),
     }
 
 def main() -> None:

@@ -3,6 +3,8 @@ import math
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from utils.join_key_resolver import JoinKeyResolver
+
 
 NEGATIVE_INDICATORS = {
     "frustrated",
@@ -122,16 +124,33 @@ def join_records(
     right_rows: List[Dict[str, Any]],
     left_key: str,
     right_key: str,
+    left_db: str = "postgresql",
+    right_db: str = "mongodb",
 ) -> List[Dict[str, Any]]:
     if not left_rows or not right_rows:
         return []
+    resolver = JoinKeyResolver()
+    sample_left = next((row.get(left_key) for row in left_rows if row.get(left_key) is not None), None)
+    sample_right = next((row.get(right_key) for row in right_rows if row.get(right_key) is not None), None)
     indexed: Dict[str, List[Dict[str, Any]]] = {}
     for row in right_rows:
-        candidate = normalize_for_compare(row.get(right_key))
+        _, right_norm = resolver.resolve_cross_db_join(
+            left_key=sample_left if sample_left is not None else row.get(right_key),
+            right_key=row.get(right_key),
+            left_db_type=left_db,
+            right_db_type=right_db,
+        )
+        candidate = normalize_for_compare(right_norm)
         indexed.setdefault(candidate, []).append(row)
     merged: List[Dict[str, Any]] = []
     for row in left_rows:
-        candidate = normalize_for_compare(row.get(left_key))
+        left_norm, _ = resolver.resolve_cross_db_join(
+            left_key=row.get(left_key),
+            right_key=sample_right if sample_right is not None else row.get(left_key),
+            left_db_type=left_db,
+            right_db_type=right_db,
+        )
+        candidate = normalize_for_compare(left_norm)
         for partner in indexed.get(candidate, []):
             joined = dict(row)
             for key, value in partner.items():
@@ -218,16 +237,18 @@ def wilson_interval(successes: int, total: int, z: float = 1.96) -> Tuple[float,
 def classify_failure(error_text: str, payload: Optional[Dict[str, Any]] = None) -> str:
     text = (error_text or "").lower()
     sql = str((payload or {}).get("sql", "")).lower()
-    if "syntax" in text or "dialect" in text or "sql" in text:
-        return "sql_dialect_error"
+    if "no compatible tool" in text or "unsupported" in text or "route" in text:
+        return "tool_routing_error"
+    if "syntax" in text or "dialect" in text or ("sql" in text and "connection" not in text):
+        return "dialect_error"
     if "join" in text or "cust-" in text or "mismatch" in text:
-        return "join_mismatch"
+        return "join_key_mismatch"
     if "column" in text or "table" in text or "schema" in text or "unknown field" in text:
-        return "schema_mismatch"
+        return "schema_error"
     if "timeout" in text or "connection" in text:
         return "execution_error"
     if sql and " join " in sql and "no such column" in text:
-        return "schema_mismatch"
+        return "schema_error"
     return "unknown_error"
 
 
