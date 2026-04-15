@@ -36,12 +36,9 @@ _Covers: X, Reddit, Medium, LinkedIn, Discord_
 | Date | Author | Title | Platform | Word Count | Link | Views |
 |------|--------|-------|----------|------------|------|-------|
 | 2026-04-10 | Kirubel | Engineering Resilience: Solving the Cross-Database Join Key Format Mismatch in AI Agents | Medium | ~1200 | [link](https://medium.com/@kirutew17654321/engineering-resilience-solving-the-cross-database-join-key-format-mismatch-in-ai-agents-ffb17b9d5a02) | -- |
-<<<<<<< HEAD
-| 2026-04-11 | Meseret | The Silent Killer of AI Data Agents (And How We're Engineering Around It) | LinkedIn | ~1800 | [link](https://www.linkedin.com/pulse/silent-killer-ai-data-agents-how-were-engineering-around-bolled-rsg8f ) | 52 |
-=======
-| 2026-04-11 | Meseret | The Silent Killer of AI Data Agents (And How We're Engineering Around It) | LinkedIn | -- | [link](https://www.linkedin.com/posts/meseret-bolled-8b395325b_aiengineering-dataengineering-aiagents-activity-7448667030389497856-bPq4) | -- |
+| 2026-04-11 | Meseret | The Silent Killer of AI Data Agents (And How We're Engineering Around It) | LinkedIn | ~1800 | [link](https://www.linkedin.com/pulse/silent-killer-ai-data-agents-how-were-engineering-around-bolled-rsg8f) | 52 |
+| 2026-04-14 | Kirubel | Why Your AI Data Agent Silently Fails on Cross-Database Queries | Medium | ~1500 | (published Apr 14) | -- |
 
->>>>>>> 4f11ad015e710bd545cf7d2af57d1489fd3a3f2d
 ### Reddit
 
 | Date | Author | Subreddit | Title | Link | Upvotes | Comments |
